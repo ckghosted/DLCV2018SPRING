@@ -337,7 +337,7 @@ class NET_VGG16_DILATED:
                                                                                      # self.keep_prob: 1.0,
                                                                                      self.bn_train: False})
                         ##### resize labels_pred into out_img_size (e.g., 256 --> 512)
-                        labels_pred = np.repeat(np.repeat(labels_pred, 8, axis=1), 8, axis=2)
+                        labels_pred = np.repeat(np.repeat(labels_pred, 16, axis=1), 16, axis=2)
                         for j in range(len(batch_mask_path)):
                             mask = self.label_to_rgb(labels_pred[j])
                             skimage.io.imsave(os.path.join(out_path, batch_mask_path[j]), mask)
