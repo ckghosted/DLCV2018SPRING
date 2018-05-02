@@ -1,4 +1,4 @@
-# DLCV 2018 Sprint HW3
+# DLCV 2018 Spring HW3
 ## Semantic Segmentation
 ### Inference
 - Baseline model (VGG16_FCN32s) [1]
@@ -50,5 +50,7 @@ python3 mean_iou_evaluate.py -g <ground_truth_directory> -p <prediction_director
 | 0.67754      | 0.70554     | 0.69120       |
 
 ### References
-[1] Jonathan Long, Evan Shelhamer, and Trevor Darrell, "Fully convolutional networks for semantic segmentation". In CVPR, 2015.
-[2] Fisher Yu and Vladlen Koltun, "Multi-scale context aggregation by dilated convolutions". In ICLR, 2016.
+[1] Jonathan Long, Evan Shelhamer, and Trevor Darrell, "Fully convolutional networks for semantic segmentation". In CVPR, 2015.  
+[2] Fisher Yu and Vladlen Koltun, "Multi-scale context aggregation by dilated convolutions". In ICLR, 2016.  
+[3] Tensorflow implementation: https://github.com/sagieppel/Fully-convolutional-neural-network-FCN-for-semantic-segmentation-Tensorflow-implementation  
+[4] Pre-trained vgg16: https://drive.google.com/file/d/0B6njwynsu2hXZWcwX0FKTGJKRWs/view?usp=sharing or ftp://mi.eng.cam.ac.uk/pub/mttt2/models/vgg16.npy
