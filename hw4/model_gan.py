@@ -147,6 +147,7 @@ class GAN(object):
                 for _ in range(train_period_d):
                     batch_files = data_list[idx*bsize:(idx+1)*bsize]
                     if len(batch_files) == 0:
+                        idx = nBatches
                         break
                     batch = [get_image(batch_file) for batch_file in batch_files]
                     batch_images = np.array(batch).astype(np.float32)
