@@ -146,6 +146,7 @@ class VAE(object):
         for epoch in range(1, (nEpochs+1)):
             mse_train_batch = []
             kld_train_batch = []
+            np.random.shuffle(train_list)
             for idx in tqdm.tqdm(range(nBatches)):
                 batch_files = train_list[idx*bsize:(idx+1)*bsize]
                 batch = [get_image(batch_file) for batch_file in batch_files]

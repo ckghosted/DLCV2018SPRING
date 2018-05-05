@@ -141,10 +141,13 @@ class GAN(object):
             loss_d_batch = []
             loss_g_batch = []
             idx = 0
+            np.random.shuffle(data_list)
             while idx < nBatches:
                 #### update D 
                 for _ in range(train_period_d):
                     batch_files = data_list[idx*bsize:(idx+1)*bsize]
+                    if len(batch_files) == 0:
+                        break
                     batch = [get_image(batch_file) for batch_file in batch_files]
                     batch_images = np.array(batch).astype(np.float32)
                     batch_z_random = np.random.uniform(-1, 1, [batch_images.shape[0], self.random_dim]).astype(np.float32)
@@ -335,6 +338,107 @@ class WGAN(GAN):
         ## Create model saver (keep all checkpoint!)
         self.saver = tf.train.Saver(max_to_keep = None)
 
-
+class ACGAN(GAN):
+    def __init__(self,
+                 sess,
+                 model_name='ACGAN',
+                 result_path='/data/put_data/cclin/ntu/dlcv2018/hw4/results',
+                 random_dim=100,
+                 img_size=64,
+                 c_dim=3,
+                 bnDecay=0.9,
+                 epsilon=1e-5,
+                 gp_scale=10.0,
+                 y_dim=1):
+        super(ACGAN, self).__init__(sess,
+                                   model_name,
+                                   result_path,
+                                   random_dim,
+                                   img_size,
+                                   c_dim,
+                                   bnDecay,
+                                   epsilon)
+        self.gp_scale = gp_scale
+        self.y_dim = y_dim
+    
+    # Only need to re-define build_model()
+    def build_model(self):
+        image_dims = [self.img_size, self.img_size, self.c_dim]
+        self.input_images = tf.placeholder(tf.float32, shape=[None]+image_dims, name='input_images')
+        self.input_labels = tf.placeholder(tf.float32, shape=[None, self.y_dim], name='latent_vec')
+        self.z_random = tf.placeholder(tf.float32, shape=[None, self.random_dim], name='latent_vec')
+        self.bn_train = tf.placeholder('bool')
+        self.learning_rate = tf.placeholder(tf.float32, shape=[])
+        
+        ## batch normalization
+        self.d_bn0 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='d_bn0')
+        self.d_bn1 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='d_bn1')
+        self.d_bn2 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='d_bn2')
+        self.d_bn3 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='d_bn3')
+        self.g_bn0 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='g_bn0')
+        self.g_bn1 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='g_bn1')
+        self.g_bn2 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='g_bn2')
+        self.g_bn3 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='g_bn3')
+        
+        ## training data operations
+        self.image_fake = self.generator(self.z_random, self.input_labels, self.bn_train)
+        self.d_gan_real, self.d_gan_logit_real, self.d_aux_real, self.d_aux_logit_real = \
+            self.discriminator(self.input_images, self.bn_train)
+        self.d_fake, self.d_logit_fake = self.discriminator(self.image_fake, self.bn_train, reuse=True)
+        self.image_sample = self.generator(self.z_random, bn_train=False, reuse=True)
+        
+        ## loss
+        self.loss_d_real = tf.reduce_mean(self.d_logit_real)
+        self.loss_d_fake = tf.reduce_mean(self.d_logit_fake)
+        self.loss_d = self.loss_d_fake - self.loss_d_real
+        self.loss_g = -tf.reduce_mean(self.d_logit_fake)
+        
+        ## gradient penalty
+        epsilon = tf.random_uniform([], 0.0, 1.0)
+        x_hat = epsilon * self.input_images + (1 - epsilon) * self.image_fake
+        d_hat = self.discriminator(x_hat, self.bn_train, reuse=True)
+        self.ddx = tf.gradients(d_hat, x_hat)[0]
+        self.ddx = tf.sqrt(tf.reduce_sum(tf.square(self.ddx), axis=1))
+        self.ddx = tf.reduce_mean(tf.square(self.ddx - 1.0) * self.gp_scale)
+        self.loss_d = self.loss_d + self.ddx
+        
+        ## training operations
+        train_vars = tf.trainable_variables()
+        self.vars_d = [var for var in train_vars if 'discriminator' in var.name]
+        self.vars_g = [var for var in train_vars if 'generator' in var.name]
+        self.train_op_d = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss_d, var_list=self.vars_d)
+        self.train_op_g = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss_g, var_list=self.vars_g)
+        
+        ## Create model saver (keep all checkpoint!)
+        self.saver = tf.train.Saver(max_to_keep = None)
+    
+    def discriminator(self, input_images, bn_train, reuse = False):
+        with tf.variable_scope("discriminator") as scope:
+            if reuse:
+                scope.reuse_variables()
+            h0 = lrelu(self.d_bn0(conv2d(input_images, output_dim=32, name='h0'), train=bn_train)) ## [-1, 32, 32, 32]
+            h1 = lrelu(self.d_bn1(conv2d(h0, output_dim=64, name='h1'), train=bn_train)) ## [-1, 16, 16, 64]
+            h2 = lrelu(self.d_bn2(conv2d(h1, output_dim=128, name='h2'), train=bn_train)) ## [-1, 8, 8, 128]
+            h3 = lrelu(self.d_bn3(conv2d(h2, output_dim=256, name='h3'), train=bn_train)) ## [-1, 4, 4, 256]
+            h4_gan = linear(tf.reshape(h3, [-1, 4096]), 1, 'h4_gan')
+            h4_aux = linear(tf.reshape(h3, [-1, 4096]), self.y_dim, 'h4_aux')
+            return tf.nn.sigmoid(h4_gan), h4_gan, tf.nn.sigmoid(h4_aux), h4_aux
+    
+    def generator(self, z_random, input_labels, bn_train, reuse = False):
+        with tf.variable_scope("generator") as scope:
+            if reuse:
+                scope.reuse_variables()
+            bsize = tf.shape(z_random)[0]
+            inputs = tf.concat([z_random, input_labels], axis=1)
+            h0 = tf.reshape(linear(inputs, 4096, 'h0'), [-1, 4, 4, 256])
+            h0 = lrelu(self.g_bn0(h0, train=bn_train))
+            h1 = deconv2d(h0, [bsize, 8, 8, 128], name='h1')
+            h1 = lrelu(self.g_bn1(h1, train=bn_train))
+            h2 = deconv2d(h1, [bsize, 16, 16, 64], name='h2')
+            h2 = lrelu(self.g_bn2(h2, train=bn_train))
+            h3 = deconv2d(h2, [bsize, 32, 32, 32], name='h3')
+            h3 = lrelu(self.g_bn3(h3, train=bn_train))
+            h4 = deconv2d(h3, [bsize, 64, 64, 3], name='h4')
+            return (tf.tanh(h4)/2. + 0.5)
 
 
