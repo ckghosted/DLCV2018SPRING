@@ -10,6 +10,9 @@ import skimage
 import skimage.transform
 import skimage.io
 
+import pandas as pd
+from sklearn.manifold import TSNE
+
 from ops import *
 from utils import *
 
@@ -18,51 +21,39 @@ class VAE(object):
                  sess,
                  model_name='VAE',
                  result_path='/data/put_data/cclin/ntu/dlcv2018/hw4/results',
-                 input_height=64,
-                 input_width=64,
-                 c_dim=3,
-                 output_height=64,
-                 output_width=64,
                  latent_dim=512,
-                 bnDecay=0.99,
-                 lambda_kl=1e-5,
-                 l2scale=0.001):
+                 lambda_kl=1e-2,
+                 img_size=64,
+                 c_dim=3,
+                 bnDecay=0.9,
+                 epsilon=1e-5):
         self.sess = sess
-        self.result_path = result_path
         self.model_name = model_name
-        self.input_height = input_height
-        self.input_width = input_width
-        self.c_dim = c_dim
-        self.output_height = output_height
-        self.output_width = output_width
+        self.result_path = result_path
         self.latent_dim = latent_dim
-        self.bnDecay = bnDecay
-        self.epsilon = 1 - bnDecay
-        self.l2scale = l2scale
-        
         self.lambda_kl = lambda_kl
-        
+        self.img_size = img_size
+        self.c_dim = c_dim
+        self.bnDecay = bnDecay
+        self.epsilon = epsilon
     
     # Build the VAE
     def build_model(self):
-        image_dims = [self.input_height, self.input_width, self.c_dim]
+        image_dims = [self.img_size, self.img_size, self.c_dim]
         self.input_images = tf.placeholder(tf.float32, shape=[None]+image_dims, name='input_images')
-        self.input_images_ = tf.placeholder(tf.float32, shape=[None]+image_dims, name='input_images_')
         self.z_random = tf.placeholder(tf.float32, shape=[None, self.latent_dim], name='latent_vec')
         self.bn_train = tf.placeholder('bool')
         self.learning_rate = tf.placeholder(tf.float32, shape=[])
         
         ## batch normalization
-        self.enc_bn0 = batch_norm(name='enc_bn0')
-        self.enc_bn1 = batch_norm(name='enc_bn1')
-        self.enc_bn2 = batch_norm(name='enc_bn2')
-        self.enc_bn3 = batch_norm(name='enc_bn3')
-        self.enc_bn4_mu = batch_norm(name='enc_bn4_mu')
-        self.enc_bn4_logvar = batch_norm(name='enc_bn4_logvar')
-        self.dec_bn0 = batch_norm(name='dec_bn0')
-        self.dec_bn1 = batch_norm(name='dec_bn1')
-        self.dec_bn2 = batch_norm(name='dec_bn2')
-        self.dec_bn3 = batch_norm(name='dec_bn3')
+        self.enc_bn0 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='enc_bn0')
+        self.enc_bn1 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='enc_bn1')
+        self.enc_bn2 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='enc_bn2')
+        self.enc_bn3 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='enc_bn3')
+        self.dec_bn0 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='dec_bn0')
+        self.dec_bn1 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='dec_bn1')
+        self.dec_bn2 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='dec_bn2')
+        self.dec_bn3 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='dec_bn3')
         
         ## training data operations
         self.z_mu, self.z_logvar = self.encoder(self.input_images, self.bn_train)
@@ -119,8 +110,8 @@ class VAE(object):
               test_path='/data/put_data/cclin/ntu/dlcv2018/hw4/hw4_data/test',
               nEpochs=200,
               bsize=32,
-              learning_rate_start=1e-5,
-              patience=3):
+              learning_rate_start=1e-3,
+              patience=10):
         ## create a dedicated folder for this model
         if os.path.exists(os.path.join(self.result_path, self.model_name)):
             print('WARNING: the folder "{}" already exists!'.format(os.path.join(self.result_path, self.model_name)))
@@ -128,13 +119,18 @@ class VAE(object):
             os.makedirs(os.path.join(self.result_path, self.model_name))
             os.makedirs(os.path.join(self.result_path, self.model_name, 'samples'))
             os.makedirs(os.path.join(self.result_path, self.model_name, 'recons'))
+            os.makedirs(os.path.join(self.result_path, self.model_name, 'tsne'))
             os.makedirs(os.path.join(self.result_path, self.model_name, 'models'))
         
         ## data list
-        train_list = glob.glob(os.path.join(train_path, '*.png'))
+        train_list = np.sort(glob.glob(os.path.join(train_path, '*.png')))
         nBatches = int(np.ceil(len(train_list) / bsize))
-        test_list = glob.glob(os.path.join(test_path, '*.png'))
+        test_list = np.sort(glob.glob(os.path.join(test_path, '*.png')))
         nBatches_test = int(np.ceil(len(test_list) / bsize))
+        ### read testing attributes for visualization
+        attr_test = pd.read_csv(os.path.join(os.path.dirname(test_path), 'test.csv'))
+        attr_names = list(attr_test.columns.values)[1:]
+        colors = ['royalblue', 'tomato']
         
         ## initialization
         initOp = tf.global_variables_initializer()
@@ -145,18 +141,14 @@ class VAE(object):
         kld_train = []
         mse_test = []
         kld_test = []
-        best_mse_test = 0
+        best_vae_loss = 0
         stopping_step = 0
         for epoch in range(1, (nEpochs+1)):
             mse_train_batch = []
             kld_train_batch = []
             for idx in tqdm.tqdm(range(nBatches)):
                 batch_files = train_list[idx*bsize:(idx+1)*bsize]
-                batch = [get_image(batch_file,
-                                   input_height=self.input_height,
-                                   input_width=self.input_width,
-                                   resize_height=self.output_height,
-                                   resize_width=self.output_width) for batch_file in batch_files]
+                batch = [get_image(batch_file) for batch_file in batch_files]
                 batch_images = np.array(batch).astype(np.float32)
                 _, mse, kld = self.sess.run([self.train_op, self.recon_loss, self.kl_loss],
                                             feed_dict={self.input_images: batch_images,
@@ -164,19 +156,18 @@ class VAE(object):
                                                        self.learning_rate: learning_rate_start})
                 mse_train_batch.append(np.mean(mse))
                 kld_train_batch.append(np.mean(kld))
-            mse_train.append(np.mean(mse_train_batch))
-            kld_train.append(np.mean(kld_train_batch))
+            ### record training loss for each iteration (instead of each epoch)
+            mse_train.extend(mse_train_batch)
+            kld_train.extend(kld_train_batch)
+            # mse_train.append(np.mean(mse_train_batch))
+            # kld_train.append(np.mean(kld_train_batch))
             
             ### compute testing loss
             mse_test_batch = []
             kld_test_batch = []
             for idx in tqdm.tqdm(range(nBatches_test)):
                 batch_files = test_list[idx*bsize:(idx+1)*bsize]
-                batch = [get_image(batch_file,
-                                   input_height=self.input_height,
-                                   input_width=self.input_width,
-                                   resize_height=self.output_height,
-                                   resize_width=self.output_width) for batch_file in batch_files]
+                batch = [get_image(batch_file) for batch_file in batch_files]
                 batch_images = np.array(batch).astype(np.float32)
                 mse, kld = self.sess.run([self.recon_loss, self.kl_loss],
                                          feed_dict={self.input_images: batch_images,
@@ -188,34 +179,32 @@ class VAE(object):
             print('Epoch: %d, train mse: %f, train kld: %f, test mse: %f, test kld: %f' % \
                   (epoch, np.mean(mse_train_batch), np.mean(kld_train_batch), np.mean(mse_test_batch), np.mean(kld_test_batch)))
             
-            ### save model if improvement
+            ### save model if improvement, stop if reach patience
+            current_vae_loss = np.mean(mse_test_batch) + self.lambda_kl * np.mean(kld_test_batch)
             if epoch == 1:
-                best_mse_test = np.mean(mse_test_batch)
+                best_vae_loss = current_vae_loss
             else:
-                if np.mean(mse_test_batch) < best_mse_test:
-                    best_mse_test = np.mean(mse_test_batch)
+                if current_vae_loss < best_vae_loss:
+                    best_vae_loss = current_vae_loss
                     self.saver.save(self.sess,
                                     os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
                                     global_step=epoch)
                     stopping_step = 0
                 else:
                     stopping_step += 1
+                print('stopping_step = %d' % stopping_step)
                 if stopping_step >= patience:
                     print('stopping_step >= patience (%d), stop training' % patience)
                     break
             
             ### inference during training process
             if epoch % 5 == 0:
-                #### reconstruct 10 testing images
-                batch_files = np.sort(glob.glob(os.path.join(test_path, '4000*.png')))
-                batch = [get_image(batch_file,
-                                   input_height=self.input_height,
-                                   input_width=self.input_width,
-                                   resize_height=self.output_height,
-                                   resize_width=self.output_width) for batch_file in batch_files]
+                #### reconstruct the first 10 testing images
+                batch_files = test_list[0:10]
+                batch = [get_image(batch_file) for batch_file in batch_files]
                 batch_images = np.array(batch).astype(np.float32)
                 recons = self.sess.run(self.recon_images, feed_dict={self.input_images: batch_images,
-                                                                      self.bn_train: False})
+                                                                     self.bn_train: False})
                 fig = self.plot(np.concatenate((batch_images, recons), axis=0), 2, 10)
                 plt.savefig(os.path.join(self.result_path, self.model_name, 'recons', '{}.png'.format(str(epoch).zfill(3))), 
                             bbox_inches='tight')
@@ -233,21 +222,128 @@ class VAE(object):
                 z_mu_all = []
                 for idx in tqdm.tqdm(range(nBatches_test)):
                     batch_files = test_list[idx*bsize:(idx+1)*bsize]
-                    batch = [get_image(batch_file,
-                                       input_height=self.input_height,
-                                       input_width=self.input_width,
-                                       resize_height=self.output_height,
-                                       resize_width=self.output_width) for batch_file in batch_files]
+                    batch = [get_image(batch_file) for batch_file in batch_files]
                     batch_images = np.array(batch).astype(np.float32)
                     z_mu = self.sess.run(self.z_mu,
                                          feed_dict={self.input_images: batch_images,
                                                     self.bn_train: False})
                     z_mu_all.extend(z_mu)
                 z_mu_all = np.array(z_mu_all).astype(np.float32)
-                print(z_mu_all.shape)
-                ## TODO: t-SNE and visualization
+                z_mu_all_2d = TSNE(n_components=2).fit_transform(z_mu_all)
+                for attr_name in attr_names:
+                    is_attr_true = np.array(attr_test[attr_name]).astype(int) == 1
+                    fig = plt.figure(figsize=(8, 8))
+                    attr0 = plt.scatter(x=z_mu_all_2d[is_attr_true, 0],
+                                        y=z_mu_all_2d[is_attr_true, 1],
+                                        color=colors[0],
+                                        alpha=0.5)
+                    attr1 = plt.scatter(x=z_mu_all_2d[~is_attr_true, 0],
+                                        y=z_mu_all_2d[~is_attr_true, 1],
+                                        color=colors[1],
+                                        alpha=0.5)
+                    plt.legend((attr0, attr1), ('True', 'False'), fontsize=12, ncol=1, loc=2)
+                    plt.title(attr_name, fontsize=20)
+                    plt.savefig(os.path.join(self.result_path, self.model_name, 'tsne', '{}_{}.png'.format(str(epoch).zfill(3), attr_name)), 
+                                bbox_inches='tight')
+                    plt.close(fig)
                 
         return [mse_train, kld_train, mse_test, kld_test]
+    
+    def inference(self,
+                  test_path='/data/put_data/cclin/ntu/dlcv2018/hw4/hw4_data/test',
+                  gen_from=None,
+                  gen_from_ckpt=None,
+                  out_path=None,
+                  bsize=32,
+                  attr_name='Male',
+                  set_seed=1002):
+        ## create output folder
+        if gen_from is None:
+            gen_from = os.path.join(self.result_path, self.model_name, 'models')
+        if out_path is not None:
+            if os.path.exists(out_path):
+                print('WARNING: the output path "{}" already exists!'.format(out_path))
+            else:
+                os.makedirs(out_path)
+        else:
+            out_path = os.path.join(self.result_path, self.model_name)
+        
+        ## load previous model if possible
+        could_load, checkpoint_counter = self.load(gen_from, gen_from_ckpt)
+        if could_load:
+            print(" [*] Load SUCCESS")
+            ### set seed to generate identical figures for the report
+            np.random.seed(set_seed)
+            ### data list
+            test_list = np.sort(glob.glob(os.path.join(test_path, '*.png')))
+            nBatches_test = int(np.ceil(len(test_list) / bsize))
+            ### read testing attributes for visualization
+            attr_test = pd.read_csv(os.path.join(os.path.dirname(test_path), 'test.csv'))
+            attr_names = list(attr_test.columns.values)[1:]
+            colors = ['royalblue', 'tomato']
+            
+            ### fig1_2.jpg: learning curve
+            #### Assume that 'results.npy' (containing losses vs. training iterations)
+            #### is saved in the same directory as the model checkpoint
+            results = np.load(os.path.join(gen_from, 'results.npy'))
+            fig, ax = plt.subplots(1,2, figsize=(16,6))
+            ax[0].plot(range(len(results[0])), results[0])
+            ax[0].set_xlabel('Training iterations')
+            ax[0].set_title('MSE')
+            ax[1].plot(range(len(results[1])), results[1])
+            ax[1].set_xlabel('Training iterations')
+            ax[1].set_title('KLD')
+            plt.savefig(os.path.join(out_path, 'fig1_2.jpg'))
+            plt.close(fig)
+            
+            ### fig1_3.jpg: reconstruct the first 10 testing images
+            batch_files = test_list[0:10]
+            batch = [get_image(batch_file) for batch_file in batch_files]
+            batch_images = np.array(batch).astype(np.float32)
+            recons = self.sess.run(self.recon_images, feed_dict={self.input_images: batch_images,
+                                                                 self.bn_train: False})
+            fig = self.plot(np.concatenate((batch_images, recons), axis=0), 2, 10)
+            plt.savefig(os.path.join(out_path, 'fig1_3.jpg'), 
+                        bbox_inches='tight')
+            plt.close(fig)
+            
+            #### fig1_4.jpg: produce 32 random images
+            samples = self.sess.run(self.sample_images, feed_dict={self.z_random: np.random.randn(32, self.latent_dim),
+                                                                   self.bn_train: False})
+            fig = self.plot(samples, 4, 8)
+            plt.savefig(os.path.join(out_path, 'fig1_4.jpg'), 
+                        bbox_inches='tight')
+            plt.close(fig)
+            
+            ### fig1_5.jpg: visualization
+            #### t-SNE
+            z_mu_all = []
+            for idx in tqdm.tqdm(range(nBatches_test)):
+                batch_files = test_list[idx*bsize:(idx+1)*bsize]
+                batch = [get_image(batch_file) for batch_file in batch_files]
+                batch_images = np.array(batch).astype(np.float32)
+                z_mu = self.sess.run(self.z_mu,
+                                     feed_dict={self.input_images: batch_images,
+                                                self.bn_train: False})
+                z_mu_all.extend(z_mu)
+            z_mu_all = np.array(z_mu_all).astype(np.float32)
+            z_mu_all_2d = TSNE(n_components=2).fit_transform(z_mu_all)
+            #### plot
+            is_attr_true = np.array(attr_test[attr_name]).astype(int) == 1
+            fig = plt.figure(figsize=(8, 8))
+            attr0 = plt.scatter(x=z_mu_all_2d[is_attr_true, 0],
+                                y=z_mu_all_2d[is_attr_true, 1],
+                                color=colors[0],
+                                alpha=0.5)
+            attr1 = plt.scatter(x=z_mu_all_2d[~is_attr_true, 0],
+                                y=z_mu_all_2d[~is_attr_true, 1],
+                                color=colors[1],
+                                alpha=0.5)
+            plt.legend((attr0, attr1), ('True', 'False'), fontsize=12, ncol=1, loc=2)
+            plt.title(attr_name, fontsize=20)
+            plt.savefig(os.path.join(out_path, 'fig1_5.jpg'), 
+                        bbox_inches='tight')
+            plt.close(fig)
     
     def plot(self, samples, n_row, n_col):
         fig = plt.figure(figsize=(n_col*2, n_row*2))
@@ -261,6 +357,21 @@ class VAE(object):
             ax.set_aspect('equal')
             plt.imshow(sample.reshape(64, 64, 3))
         return fig
+    
+    def load(self, init_from, init_from_ckpt=None):
+        ckpt = tf.train.get_checkpoint_state(init_from)
+        if ckpt and ckpt.model_checkpoint_path:
+            if init_from_ckpt is None:
+                ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+            else:
+                ckpt_name = init_from_ckpt
+            self.saver.restore(self.sess, os.path.join(init_from, ckpt_name))
+            counter = int(next(re.finditer("(\d+)(?!.*\d)",ckpt_name)).group(0))
+            print(" [*] Success to read {}".format(ckpt_name))
+            return True, counter
+        else:
+            print(" [*] Failed to find a checkpoint")
+            return False, 0
 
 
 
