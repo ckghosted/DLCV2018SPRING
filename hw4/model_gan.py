@@ -332,8 +332,8 @@ class WGAN(GAN):
         self.train_op_d = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss_d, var_list=self.vars_d)
         self.train_op_g = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss_g, var_list=self.vars_g)
         
-        ## Create model saver (keep the best 5 checkpoint)
-        self.saver = tf.train.Saver(max_to_keep = 5)
+        ## Create model saver (keep all checkpoint!)
+        self.saver = tf.train.Saver(max_to_keep = None)
 
 
 
