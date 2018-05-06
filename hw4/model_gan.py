@@ -187,12 +187,12 @@ class GAN(object):
                             bbox_inches='tight')
                 plt.close(fig)
                 #### save model only if epoch >= 200 (more stable)
-                if epoch >= 200:
+                if epoch >= 100:
                     self.saver.save(self.sess,
                                     os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
                                     global_step=epoch)
             
-        return [loss_d, loss_g]
+        return [loss_d_list, loss_g_list]
     
     def inference(self,
                   gen_from=None,
