@@ -55,8 +55,8 @@ class GAN(object):
         
         ## training data operations
         self.image_fake = self.generator(self.z_random, self.bn_train)
-        self.d_real, self.d_logit_real = self.discriminator(self.input_images, self.bn_train)
-        self.d_fake, self.d_logit_fake = self.discriminator(self.image_fake, self.bn_train, reuse=True)
+        self.d_logit_real = self.discriminator(self.input_images, self.bn_train)
+        self.d_logit_fake = self.discriminator(self.image_fake, self.bn_train, reuse=True)
         self.image_sample = self.generator(self.z_random, bn_train=False, reuse=True)
         
         ## loss
@@ -86,7 +86,7 @@ class GAN(object):
             h2 = lrelu(self.d_bn2(conv2d(h1, output_dim=128, name='h2'), train=bn_train)) ## [-1, 8, 8, 128]
             h3 = lrelu(self.d_bn3(conv2d(h2, output_dim=256, name='h3'), train=bn_train)) ## [-1, 4, 4, 256]
             h4 = linear(tf.reshape(h3, [-1, 4096]), 1, 'h4')
-            return tf.nn.sigmoid(h4), h4
+            return h4
     
     def generator(self, z_random, bn_train, reuse = False):
         with tf.variable_scope("generator") as scope:
@@ -169,7 +169,7 @@ class GAN(object):
                     loss_g_batch.append(loss_g)
             ### record D and G loss for each iteration (instead of each epoch)
             loss_d_list.extend(loss_d_batch)
-            loss_d_list.extend(loss_g_batch)
+            loss_g_list.extend(loss_g_batch)
             # loss_d.append(np.mean(loss_d_batch))
             # loss_g.append(np.mean(loss_g_batch))
             
@@ -186,7 +186,7 @@ class GAN(object):
                 plt.savefig(os.path.join(self.result_path, self.model_name, 'samples', '{}.png'.format(str(epoch).zfill(3))), 
                             bbox_inches='tight')
                 plt.close(fig)
-                #### save model only if epoch >= 200 (more stable)
+                #### save model only if epoch >= 100 (more stable)
                 if epoch >= 100:
                     self.saver.save(self.sess,
                                     os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
@@ -237,8 +237,7 @@ class GAN(object):
             samples = self.sess.run(self.image_sample, feed_dict={self.z_random: batch_z_random,
                                                                   self.bn_train: False})
             fig = self.plot(samples, 4, 8)
-            plt.savefig(os.path.join(self.result_path, self.model_name, 'samples', '{}.png'.format(str(epoch).zfill(3))), 
-                        bbox_inches='tight')
+            plt.savefig(os.path.join(out_path, 'fig2_3.jpg'))
             plt.close(fig)
     
     def plot(self, samples, n_row, n_col):
@@ -310,8 +309,8 @@ class WGAN(GAN):
         
         ## training data operations
         self.image_fake = self.generator(self.z_random, self.bn_train)
-        self.d_real, self.d_logit_real = self.discriminator(self.input_images, self.bn_train)
-        self.d_fake, self.d_logit_fake = self.discriminator(self.image_fake, self.bn_train, reuse=True)
+        self.d_logit_real = self.discriminator(self.input_images, self.bn_train)
+        self.d_logit_fake = self.discriminator(self.image_fake, self.bn_train, reuse=True)
         self.image_sample = self.generator(self.z_random, bn_train=False, reuse=True)
         
         ## loss
@@ -383,32 +382,35 @@ class ACGAN(GAN):
         
         ## training data operations
         self.image_fake = self.generator(self.z_random, self.input_labels, self.bn_train)
-        self.d_gan_real, self.d_gan_logit_real, self.d_aux_real, self.d_aux_logit_real = \
-            self.discriminator(self.input_images, self.bn_train)
-        self.d_fake, self.d_logit_fake = self.discriminator(self.image_fake, self.bn_train, reuse=True)
-        self.image_sample = self.generator(self.z_random, bn_train=False, reuse=True)
+        self.d_gan_logit_real, self.d_aux_logit_real = self.discriminator(self.input_images, self.bn_train)
+        self.d_gan_logit_fake, self.d_aux_logit_fake = self.discriminator(self.image_fake, self.bn_train, reuse=True)
+        self.image_sample = self.generator(self.z_random, self.input_labels, bn_train=False, reuse=True)
         
         ## loss
-        self.loss_d_real = tf.reduce_mean(self.d_logit_real)
-        self.loss_d_fake = tf.reduce_mean(self.d_logit_fake)
-        self.loss_d = self.loss_d_fake - self.loss_d_real
-        self.loss_g = -tf.reduce_mean(self.d_logit_fake)
-        
-        ## gradient penalty
-        epsilon = tf.random_uniform([], 0.0, 1.0)
-        x_hat = epsilon * self.input_images + (1 - epsilon) * self.image_fake
-        d_hat = self.discriminator(x_hat, self.bn_train, reuse=True)
-        self.ddx = tf.gradients(d_hat, x_hat)[0]
-        self.ddx = tf.sqrt(tf.reduce_sum(tf.square(self.ddx), axis=1))
-        self.ddx = tf.reduce_mean(tf.square(self.ddx - 1.0) * self.gp_scale)
-        self.loss_d = self.loss_d + self.ddx
+        ### Original GAN loss
+        self.loss_d_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.d_gan_logit_real,
+                                                                                  labels=tf.ones_like(self.d_gan_logit_real)))
+        self.loss_d_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.d_gan_logit_fake,
+                                                                                  labels=tf.zeros_like(self.d_gan_logit_fake)))
+        self.loss_d = self.loss_d_real + self.loss_d_fake
+        self.loss_g = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.d_gan_logit_fake,
+                                                                             labels=tf.ones_like(self.d_gan_logit_fake)))
+        ### AUX loss
+        self.loss_aux_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.d_aux_logit_real,
+                                                                               labels=tf.ones_like(self.input_labels)))
+        self.loss_aux_g = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.d_aux_logit_fake,
+                                                                                 labels=tf.ones_like(self.input_labels)))
+        self.loss_aux = self.loss_aux_d + self.loss_aux_g
+        ### GAN + AUX
+        self.loss_all_d = self.loss_d + self.loss_aux
+        self.loss_all_g = self.loss_g + self.loss_aux
         
         ## training operations
         train_vars = tf.trainable_variables()
         self.vars_d = [var for var in train_vars if 'discriminator' in var.name]
         self.vars_g = [var for var in train_vars if 'generator' in var.name]
-        self.train_op_d = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss_d, var_list=self.vars_d)
-        self.train_op_g = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss_g, var_list=self.vars_g)
+        self.train_op_d = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss_all_d, var_list=self.vars_d)
+        self.train_op_g = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss_all_g, var_list=self.vars_g)
         
         ## Create model saver (keep all checkpoint!)
         self.saver = tf.train.Saver(max_to_keep = None)
@@ -423,7 +425,7 @@ class ACGAN(GAN):
             h3 = lrelu(self.d_bn3(conv2d(h2, output_dim=256, name='h3'), train=bn_train)) ## [-1, 4, 4, 256]
             h4_gan = linear(tf.reshape(h3, [-1, 4096]), 1, 'h4_gan')
             h4_aux = linear(tf.reshape(h3, [-1, 4096]), self.y_dim, 'h4_aux')
-            return tf.nn.sigmoid(h4_gan), h4_gan, tf.nn.sigmoid(h4_aux), h4_aux
+            return h4_gan, h4_aux
     
     def generator(self, z_random, input_labels, bn_train, reuse = False):
         with tf.variable_scope("generator") as scope:
@@ -441,5 +443,100 @@ class ACGAN(GAN):
             h3 = lrelu(self.g_bn3(h3, train=bn_train))
             h4 = deconv2d(h3, [bsize, 64, 64, 3], name='h4')
             return (tf.tanh(h4)/2. + 0.5)
+    
+    def train(self,
+              init_from=None,
+              train_path='/data/put_data/cclin/ntu/dlcv2018/hw4/hw4_data/train',
+              test_path='/data/put_data/cclin/ntu/dlcv2018/hw4/hw4_data/test',
+              train_period_d=1,
+              train_period_g=2,
+              nEpochs=200,
+              bsize=32,
+              learning_rate_start=1e-3,
+              patience=10):
+        ## create a dedicated folder for this model
+        if os.path.exists(os.path.join(self.result_path, self.model_name)):
+            print('WARNING: the folder "{}" already exists!'.format(os.path.join(self.result_path, self.model_name)))
+        else:
+            os.makedirs(os.path.join(self.result_path, self.model_name))
+            os.makedirs(os.path.join(self.result_path, self.model_name, 'samples'))
+            os.makedirs(os.path.join(self.result_path, self.model_name, 'models'))
+        
+        ## data list (it is allowed to use both training and testing images)
+        data_list = np.sort(glob.glob(os.path.join(train_path, '*.png')))
+        if test_path is not None:
+            data_list = np.concatenate((data_list, np.sort(glob.glob(os.path.join(test_path, '*.png')))), axis=0)
+        nBatches = int(np.ceil(len(data_list) / bsize))
+        ### read attributes
+        attr = pd.read_csv(os.path.join(os.path.dirname(train_path), 'train.csv'))
+        attr_names = list(attr_test.columns.values)[1:]
+        if test_path is not None:
+            attr_test = pd.read_csv(os.path.join(os.path.dirname(test_path), 'test.csv'))
+        
+        ## initialization
+        initOp = tf.global_variables_initializer()
+        self.sess.run(initOp)
+        
+        ## main training loop
+        loss_d_list = []
+        loss_g_list = []
+        best_vae_loss = 0
+        stopping_step = 0
+        for epoch in range(1, (nEpochs+1)):
+            loss_d_batch = []
+            loss_g_batch = []
+            idx = 0
+            np.random.shuffle(data_list)
+            while idx < nBatches:
+                #### update D 
+                for _ in range(train_period_d):
+                    batch_files = data_list[idx*bsize:(idx+1)*bsize]
+                    if len(batch_files) == 0:
+                        idx = nBatches
+                        break
+                    batch = [get_image(batch_file) for batch_file in batch_files]
+                    batch_images = np.array(batch).astype(np.float32)
+                    batch_z_random = np.random.uniform(-1, 1, [batch_images.shape[0], self.random_dim]).astype(np.float32)
+                    _, loss_d = self.sess.run([self.train_op_d, self.loss_d],
+                                              feed_dict={self.input_images: batch_images,
+                                                         self.z_random: batch_z_random,
+                                                         self.bn_train: True,
+                                                         self.learning_rate: learning_rate_start})
+                    loss_d_batch.append(loss_d)
+                    idx += 1
+                #### update G
+                for _ in range(train_period_g):
+                    batch_z_random = np.random.uniform(-1, 1, [bsize, self.random_dim]).astype(np.float32)
+                    _, loss_g = self.sess.run([self.train_op_g, self.loss_g],
+                                              feed_dict={self.z_random: batch_z_random,
+                                                         self.bn_train: True,
+                                                         self.learning_rate: learning_rate_start})
+                    loss_g_batch.append(loss_g)
+            ### record D and G loss for each iteration (instead of each epoch)
+            loss_d_list.extend(loss_d_batch)
+            loss_d_list.extend(loss_g_batch)
+            # loss_d.append(np.mean(loss_d_batch))
+            # loss_g.append(np.mean(loss_g_batch))
+            
+            print('Epoch: %d, loss_d: %f, loss_g: %f' % \
+                  (epoch, np.mean(loss_d_batch), np.mean(loss_g_batch)))
+            
+            ### save model and run inference for every 10 epochs
+            if epoch % 10 == 0:
+                #### produce 32 random images
+                batch_z_random = np.random.uniform(-1, 1, [32, self.random_dim]).astype(np.float32)
+                samples = self.sess.run(self.image_sample, feed_dict={self.z_random: batch_z_random,
+                                                                      self.bn_train: False})
+                fig = self.plot(samples, 4, 8)
+                plt.savefig(os.path.join(self.result_path, self.model_name, 'samples', '{}.png'.format(str(epoch).zfill(3))), 
+                            bbox_inches='tight')
+                plt.close(fig)
+                #### save model only if epoch >= 100 (more stable)
+                if epoch >= 100:
+                    self.saver.save(self.sess,
+                                    os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
+                                    global_step=epoch)
+            
+        return [loss_d_list, loss_g_list]
 
 
