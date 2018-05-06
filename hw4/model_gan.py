@@ -11,7 +11,7 @@ import skimage.transform
 import skimage.io
 
 import pandas as pd
-from sklearn.manifold import TSNE
+from sklearn.metrics import accuracy_score
 
 from ops import *
 from utils import *
@@ -365,7 +365,7 @@ class ACGAN(GAN):
     def build_model(self):
         image_dims = [self.img_size, self.img_size, self.c_dim]
         self.input_images = tf.placeholder(tf.float32, shape=[None]+image_dims, name='input_images')
-        self.input_labels = tf.placeholder(tf.float32, shape=[None, self.y_dim], name='latent_vec')
+        self.input_labels = tf.placeholder(tf.float32, shape=[None, self.y_dim], name='input_labels')
         self.z_random = tf.placeholder(tf.float32, shape=[None, self.random_dim], name='latent_vec')
         self.bn_train = tf.placeholder('bool')
         self.learning_rate = tf.placeholder(tf.float32, shape=[])
@@ -397,9 +397,9 @@ class ACGAN(GAN):
                                                                              labels=tf.ones_like(self.d_gan_logit_fake)))
         ### AUX loss
         self.loss_aux_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.d_aux_logit_real,
-                                                                               labels=tf.ones_like(self.input_labels)))
+                                                                                 labels=self.input_labels))
         self.loss_aux_g = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.d_aux_logit_fake,
-                                                                                 labels=tf.ones_like(self.input_labels)))
+                                                                                 labels=self.input_labels))
         self.loss_aux = self.loss_aux_d + self.loss_aux_g
         ### GAN + AUX
         self.loss_all_d = self.loss_d + self.loss_aux
@@ -453,7 +453,8 @@ class ACGAN(GAN):
               nEpochs=200,
               bsize=32,
               learning_rate_start=1e-3,
-              patience=10):
+              patience=10,
+              attr_name='Smiling'):
         ## create a dedicated folder for this model
         if os.path.exists(os.path.join(self.result_path, self.model_name)):
             print('WARNING: the folder "{}" already exists!'.format(os.path.join(self.result_path, self.model_name)))
@@ -467,67 +468,102 @@ class ACGAN(GAN):
         if test_path is not None:
             data_list = np.concatenate((data_list, np.sort(glob.glob(os.path.join(test_path, '*.png')))), axis=0)
         nBatches = int(np.ceil(len(data_list) / bsize))
+        idx_all = [i for i in range(len(data_list))]
         ### read attributes
         attr = pd.read_csv(os.path.join(os.path.dirname(train_path), 'train.csv'))
-        attr_names = list(attr_test.columns.values)[1:]
+        attr_names = list(attr.columns.values)[1:]
         if test_path is not None:
-            attr_test = pd.read_csv(os.path.join(os.path.dirname(test_path), 'test.csv'))
+            attr = pd.concat([attr, pd.read_csv(os.path.join(os.path.dirname(test_path), 'test.csv'))])
+        label_list = np.array(attr[attr_name])
         
         ## initialization
         initOp = tf.global_variables_initializer()
         self.sess.run(initOp)
         
         ## main training loop
-        loss_d_list = []
-        loss_g_list = []
+        loss_aux_d_list = []
+        accuracy_real_list = []
+        loss_aux_g_list = []
+        accuracy_fake_list = []
         best_vae_loss = 0
         stopping_step = 0
         for epoch in range(1, (nEpochs+1)):
-            loss_d_batch = []
-            loss_g_batch = []
+            loss_aux_d_batch = []
+            accuracy_real_batch = []
+            loss_aux_g_batch = []
+            accuracy_fake_batch = []
             idx = 0
-            np.random.shuffle(data_list)
+            np.random.shuffle(idx_all)
             while idx < nBatches:
-                #### update D 
-                for _ in range(train_period_d):
-                    batch_files = data_list[idx*bsize:(idx+1)*bsize]
+                #### update D once
+                #for _ in range(train_period_d):
+                if True:
+                    batch_idxs = idx_all[idx*32:(idx+1)*32]
+                    batch_files = data_list[batch_idxs]
                     if len(batch_files) == 0:
                         idx = nBatches
                         break
                     batch = [get_image(batch_file) for batch_file in batch_files]
                     batch_images = np.array(batch).astype(np.float32)
+                    batch_labels = np.array(label_list[batch_idxs]).astype(np.float32)
+                    batch_labels = np.expand_dims(batch_labels, axis=1)
                     batch_z_random = np.random.uniform(-1, 1, [batch_images.shape[0], self.random_dim]).astype(np.float32)
-                    _, loss_d = self.sess.run([self.train_op_d, self.loss_d],
-                                              feed_dict={self.input_images: batch_images,
-                                                         self.z_random: batch_z_random,
-                                                         self.bn_train: True,
-                                                         self.learning_rate: learning_rate_start})
-                    loss_d_batch.append(loss_d)
+                    _, loss_aux_d, d_aux_logit_real, d_aux_logit_fake = self.sess.run([self.train_op_d,
+                                                                                       self.loss_aux_d,
+                                                                                       self.d_aux_logit_real,
+                                                                                       self.d_aux_logit_fake],
+                                                                  feed_dict={self.input_images: batch_images,
+                                                                             self.input_labels: batch_labels,
+                                                                             self.z_random: batch_z_random,
+                                                                             self.bn_train: True,
+                                                                             self.learning_rate: learning_rate_start})
+                    loss_aux_d_batch.append(loss_aux_d)
+                    accuracy_real = accuracy_score(d_aux_logit_real >= 0, batch_labels == 1.0)
+                    accuracy_real_batch.append(accuracy_real)
+                    accuracy_fake = accuracy_score(d_aux_logit_fake >= 0, batch_labels == 1.0)
+                    accuracy_fake_batch.append(accuracy_fake)
                     idx += 1
-                #### update G
-                for _ in range(train_period_g):
-                    batch_z_random = np.random.uniform(-1, 1, [bsize, self.random_dim]).astype(np.float32)
-                    _, loss_g = self.sess.run([self.train_op_g, self.loss_g],
-                                              feed_dict={self.z_random: batch_z_random,
-                                                         self.bn_train: True,
-                                                         self.learning_rate: learning_rate_start})
-                    loss_g_batch.append(loss_g)
+                #### update G once
+                #for _ in range(train_period_g):
+                if True:
+                    #batch_z_random = np.random.uniform(-1, 1, [bsize, self.random_dim]).astype(np.float32)
+                    _, loss_aux_g, d_aux_logit_real, d_aux_logit_fake = self.sess.run([self.train_op_g,
+                                                                                       self.loss_aux_g,
+                                                                                       self.d_aux_logit_real,
+                                                                                       self.d_aux_logit_fake],
+                                                                  feed_dict={self.input_images: batch_images,
+                                                                             self.input_labels: batch_labels,
+                                                                             self.z_random: batch_z_random,
+                                                                             self.bn_train: True,
+                                                                             self.learning_rate: learning_rate_start})
+                    loss_aux_g_batch.append(loss_aux_g)
+                    accuracy_real = accuracy_score(d_aux_logit_real >= 0, batch_labels == 1.0)
+                    accuracy_real_batch.append(accuracy_real)
+                    accuracy_fake = accuracy_score(d_aux_logit_fake >= 0, batch_labels == 1.0)
+                    accuracy_fake_batch.append(accuracy_fake)
+                    
             ### record D and G loss for each iteration (instead of each epoch)
-            loss_d_list.extend(loss_d_batch)
-            loss_d_list.extend(loss_g_batch)
+            loss_aux_d_list.extend(loss_aux_d_batch)
+            accuracy_real_list.extend(accuracy_real_batch)
+            loss_aux_g_list.extend(loss_aux_g_batch)
+            accuracy_fake_list.extend(accuracy_fake_batch)
             # loss_d.append(np.mean(loss_d_batch))
             # loss_g.append(np.mean(loss_g_batch))
             
-            print('Epoch: %d, loss_d: %f, loss_g: %f' % \
-                  (epoch, np.mean(loss_d_batch), np.mean(loss_g_batch)))
+            print('Epoch: %d, loss_aux_d: %f, accuracy_real: %f, loss_aux_g: %f, accuracy_fake: %f' % \
+                  (epoch, np.mean(loss_aux_d_batch), np.mean(accuracy_real_batch), np.mean(loss_aux_g_batch), np.mean(accuracy_fake_batch)))
             
             ### save model and run inference for every 10 epochs
             if epoch % 10 == 0:
-                #### produce 32 random images
-                batch_z_random = np.random.uniform(-1, 1, [32, self.random_dim]).astype(np.float32)
+                #### plot 10 randomly generated images with opposite attrbutes
+                batch_z_random = np.random.uniform(-1, 1, [10, self.random_dim]).astype(np.float32)
+                batch_z_random = np.concatenate((batch_z_random, batch_z_random), axis=0)
+                batch_labels = np.array([np.repeat((0, 1), 10)]).astype(np.float32).reshape((20, 1))
+                
                 samples = self.sess.run(self.image_sample, feed_dict={self.z_random: batch_z_random,
+                                                                      self.input_labels: batch_labels,
                                                                       self.bn_train: False})
-                fig = self.plot(samples, 4, 8)
+                fig = self.plot(samples, 2, 10)
                 plt.savefig(os.path.join(self.result_path, self.model_name, 'samples', '{}.png'.format(str(epoch).zfill(3))), 
                             bbox_inches='tight')
                 plt.close(fig)
@@ -537,6 +573,6 @@ class ACGAN(GAN):
                                     os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
                                     global_step=epoch)
             
-        return [loss_d_list, loss_g_list]
+        return [loss_aux_d_list, accuracy_real_list, loss_aux_g_list, accuracy_fake_list]
 
 
