@@ -71,8 +71,12 @@ class GAN(object):
         train_vars = tf.trainable_variables()
         self.vars_d = [var for var in train_vars if 'discriminator' in var.name]
         self.vars_g = [var for var in train_vars if 'generator' in var.name]
-        self.train_op_d = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss_d, var_list=self.vars_d)
-        self.train_op_g = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss_g, var_list=self.vars_g)
+        self.train_op_d = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                                 beta1=0.5).minimize(self.loss_d,
+                                                                     var_list=self.vars_d)
+        self.train_op_g = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                                 beta1=0.5).minimize(self.loss_g,
+                                                                     var_list=self.vars_g)
         
         ## Create model saver (keep all checkpoint!)
         self.saver = tf.train.Saver(max_to_keep = None)
@@ -224,10 +228,10 @@ class GAN(object):
             results = np.load(os.path.join(gen_from, 'results.npy'))
             fig, ax = plt.subplots(1,2, figsize=(16,6))
             ax[0].plot(range(len(results[0])), results[0])
-            ax[0].set_xlabel('Training iterations')
+            ax[0].set_xlabel('Training iterations', fontsize=16)
             ax[0].set_title('D loss', fontsize=20)
             ax[1].plot(range(len(results[1])), results[1])
-            ax[1].set_xlabel('Training iterations')
+            ax[1].set_xlabel('Training iterations', fontsize=16)
             ax[1].set_title('G loss', fontsize=20)
             plt.savefig(os.path.join(out_path, 'fig2_2.jpg'))
             plt.close(fig)
@@ -332,8 +336,12 @@ class WGAN(GAN):
         train_vars = tf.trainable_variables()
         self.vars_d = [var for var in train_vars if 'discriminator' in var.name]
         self.vars_g = [var for var in train_vars if 'generator' in var.name]
-        self.train_op_d = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss_d, var_list=self.vars_d)
-        self.train_op_g = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss_g, var_list=self.vars_g)
+        self.train_op_d = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                                 beta1=0.5).minimize(self.loss_d,
+                                                                     var_list=self.vars_d)
+        self.train_op_g = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                                 beta1=0.5).minimize(self.loss_g,
+                                                                     var_list=self.vars_g)
         
         ## Create model saver (keep all checkpoint!)
         self.saver = tf.train.Saver(max_to_keep = None)
@@ -408,8 +416,12 @@ class ACGAN(GAN):
         train_vars = tf.trainable_variables()
         self.vars_d = [var for var in train_vars if 'discriminator' in var.name]
         self.vars_g = [var for var in train_vars if 'generator' in var.name]
-        self.train_op_d = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss_all_d, var_list=self.vars_d)
-        self.train_op_g = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss_all_g, var_list=self.vars_g)
+        self.train_op_d = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                                 beta1=0.5).minimize(self.loss_all_d,
+                                                                     var_list=self.vars_d)
+        self.train_op_g = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                                 beta1=0.5).minimize(self.loss_all_g,
+                                                                     var_list=self.vars_g)
         
         ## Create model saver (keep all checkpoint!)
         self.saver = tf.train.Saver(max_to_keep = None)

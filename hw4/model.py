@@ -69,7 +69,7 @@ class VAE(object):
         self.kl_loss = 0.5 * tf.reduce_mean(tf.exp(self.z_logvar) + self.z_mu**2 - 1. - self.z_logvar, 1)
         ## VAE loss
         self.vae_loss = tf.reduce_mean(self.recon_loss + self.lambda_kl * self.kl_loss)
-        self.train_op = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.vae_loss)
+        self.train_op = tf.train.AdamOptimizer(learning_rate=self.learning_rate, beta1=0.5).minimize(self.vae_loss)
         ## Create model saver (keep the best 3 checkpoint)
         self.saver = tf.train.Saver(max_to_keep = 3)
        
@@ -147,7 +147,7 @@ class VAE(object):
             mse_train_batch = []
             kld_train_batch = []
             np.random.shuffle(train_list)
-            for idx in tqdm.tqdm(range(nBatches)):
+            for idx in range(nBatches):
                 batch_files = train_list[idx*bsize:(idx+1)*bsize]
                 batch = [get_image(batch_file) for batch_file in batch_files]
                 batch_images = np.array(batch).astype(np.float32)
@@ -166,7 +166,7 @@ class VAE(object):
             ### compute testing loss
             mse_test_batch = []
             kld_test_batch = []
-            for idx in tqdm.tqdm(range(nBatches_test)):
+            for idx in range(nBatches_test):
                 batch_files = test_list[idx*bsize:(idx+1)*bsize]
                 batch = [get_image(batch_file) for batch_file in batch_files]
                 batch_images = np.array(batch).astype(np.float32)
@@ -221,7 +221,7 @@ class VAE(object):
                 
                 #### visualization
                 z_mu_all = []
-                for idx in tqdm.tqdm(range(nBatches_test)):
+                for idx in range(nBatches_test):
                     batch_files = test_list[idx*bsize:(idx+1)*bsize]
                     batch = [get_image(batch_file) for batch_file in batch_files]
                     batch_images = np.array(batch).astype(np.float32)
@@ -242,7 +242,7 @@ class VAE(object):
                                         y=z_mu_all_2d[~is_attr_true, 1],
                                         color=colors[1],
                                         alpha=0.5)
-                    plt.legend((attr0, attr1), ('True', 'False'), fontsize=12, ncol=1, loc=2)
+                    plt.legend((attr0, attr1), ('True', 'False'), fontsize=16, ncol=1, loc=2)
                     plt.title(attr_name, fontsize=20)
                     plt.savefig(os.path.join(self.result_path, self.model_name, 'tsne', '{}_{}.png'.format(str(epoch).zfill(3), attr_name)), 
                                 bbox_inches='tight')
@@ -289,11 +289,11 @@ class VAE(object):
             results = np.load(os.path.join(gen_from, 'results.npy'))
             fig, ax = plt.subplots(1,2, figsize=(16,6))
             ax[0].plot(range(len(results[0])), results[0])
-            ax[0].set_xlabel('Training iterations')
-            ax[0].set_title('MSE')
+            ax[0].set_xlabel('Training iterations', fontsize=16)
+            ax[0].set_title('MSE', fontsize=20)
             ax[1].plot(range(len(results[1])), results[1])
-            ax[1].set_xlabel('Training iterations')
-            ax[1].set_title('KLD')
+            ax[1].set_xlabel('Training iterations', fontsize=16)
+            ax[1].set_title('KLD', fontsize=20)
             plt.savefig(os.path.join(out_path, 'fig1_2.jpg'))
             plt.close(fig)
             
@@ -319,7 +319,7 @@ class VAE(object):
             ### fig1_5.jpg: visualization
             #### t-SNE
             z_mu_all = []
-            for idx in tqdm.tqdm(range(nBatches_test)):
+            for idx in range(nBatches_test):
                 batch_files = test_list[idx*bsize:(idx+1)*bsize]
                 batch = [get_image(batch_file) for batch_file in batch_files]
                 batch_images = np.array(batch).astype(np.float32)
@@ -340,7 +340,7 @@ class VAE(object):
                                 y=z_mu_all_2d[~is_attr_true, 1],
                                 color=colors[1],
                                 alpha=0.5)
-            plt.legend((attr0, attr1), ('True', 'False'), fontsize=12, ncol=1, loc=2)
+            plt.legend((attr0, attr1), ('True', 'False'), fontsize=16, ncol=1, loc=2)
             plt.title(attr_name, fontsize=20)
             plt.savefig(os.path.join(out_path, 'fig1_5.jpg'), 
                         bbox_inches='tight')
