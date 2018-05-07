@@ -4,7 +4,6 @@ import tensorflow as tf
 from tensorflow.contrib.layers import batch_norm
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-import tqdm
 
 import skimage
 import skimage.transform
