@@ -81,10 +81,10 @@ class GAN(object):
         with tf.variable_scope("discriminator") as scope:
             if reuse:
                 scope.reuse_variables()
-            h0 = lrelu(self.d_bn0(conv2d(input_images, output_dim=32, name='h0'), train=bn_train)) ## [-1, 32, 32, 32]
-            h1 = lrelu(self.d_bn1(conv2d(h0, output_dim=64, name='h1'), train=bn_train)) ## [-1, 16, 16, 64]
-            h2 = lrelu(self.d_bn2(conv2d(h1, output_dim=128, name='h2'), train=bn_train)) ## [-1, 8, 8, 128]
-            h3 = lrelu(self.d_bn3(conv2d(h2, output_dim=256, name='h3'), train=bn_train)) ## [-1, 4, 4, 256]
+            h0 = lrelu(self.d_bn0(conv2d(input_images, output_dim=32, name='h0'), train=bn_train), leak=0.1) ## [-1, 32, 32, 32]
+            h1 = lrelu(self.d_bn1(conv2d(h0, output_dim=64, name='h1'), train=bn_train), leak=0.1) ## [-1, 16, 16, 64]
+            h2 = lrelu(self.d_bn2(conv2d(h1, output_dim=128, name='h2'), train=bn_train), leak=0.1) ## [-1, 8, 8, 128]
+            h3 = lrelu(self.d_bn3(conv2d(h2, output_dim=256, name='h3'), train=bn_train), leak=0.1) ## [-1, 4, 4, 256]
             h4 = linear(tf.reshape(h3, [-1, 4096]), 1, 'h4')
             return h4
     
@@ -94,13 +94,13 @@ class GAN(object):
                 scope.reuse_variables()
             bsize = tf.shape(z_random)[0]
             h0 = tf.reshape(linear(z_random, 4096, 'h0'), [-1, 4, 4, 256])
-            h0 = lrelu(self.g_bn0(h0, train=bn_train))
+            h0 = tf.nn.relu(self.g_bn0(h0, train=bn_train))
             h1 = deconv2d(h0, [bsize, 8, 8, 128], name='h1')
-            h1 = lrelu(self.g_bn1(h1, train=bn_train))
+            h1 = tf.nn.relu(self.g_bn1(h1, train=bn_train))
             h2 = deconv2d(h1, [bsize, 16, 16, 64], name='h2')
-            h2 = lrelu(self.g_bn2(h2, train=bn_train))
+            h2 = tf.nn.relu(self.g_bn2(h2, train=bn_train))
             h3 = deconv2d(h2, [bsize, 32, 32, 32], name='h3')
-            h3 = lrelu(self.g_bn3(h3, train=bn_train))
+            h3 = tf.nn.relu(self.g_bn3(h3, train=bn_train))
             h4 = deconv2d(h3, [bsize, 64, 64, 3], name='h4')
             return (tf.tanh(h4)/2. + 0.5)
     
@@ -225,10 +225,10 @@ class GAN(object):
             fig, ax = plt.subplots(1,2, figsize=(16,6))
             ax[0].plot(range(len(results[0])), results[0])
             ax[0].set_xlabel('Training iterations')
-            ax[0].set_title('D loss')
+            ax[0].set_title('D loss', fontsize=20)
             ax[1].plot(range(len(results[1])), results[1])
             ax[1].set_xlabel('Training iterations')
-            ax[1].set_title('G loss')
+            ax[1].set_title('G loss', fontsize=20)
             plt.savefig(os.path.join(out_path, 'fig2_2.jpg'))
             plt.close(fig)
             
@@ -361,7 +361,6 @@ class ACGAN(GAN):
         self.gp_scale = gp_scale
         self.y_dim = y_dim
     
-    # Only need to re-define build_model()
     def build_model(self):
         image_dims = [self.img_size, self.img_size, self.c_dim]
         self.input_images = tf.placeholder(tf.float32, shape=[None]+image_dims, name='input_images')
@@ -396,11 +395,11 @@ class ACGAN(GAN):
         self.loss_g = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.d_gan_logit_fake,
                                                                              labels=tf.ones_like(self.d_gan_logit_fake)))
         ### AUX loss
-        self.loss_aux_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.d_aux_logit_real,
-                                                                                 labels=self.input_labels))
-        self.loss_aux_g = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.d_aux_logit_fake,
-                                                                                 labels=self.input_labels))
-        self.loss_aux = self.loss_aux_d + self.loss_aux_g
+        self.loss_aux_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.d_aux_logit_real,
+                                                                                    labels=self.input_labels))
+        self.loss_aux_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.d_aux_logit_fake,
+                                                                                    labels=self.input_labels))
+        self.loss_aux = self.loss_aux_real + self.loss_aux_fake
         ### GAN + AUX
         self.loss_all_d = self.loss_d + self.loss_aux
         self.loss_all_g = self.loss_g + self.loss_aux
@@ -419,10 +418,10 @@ class ACGAN(GAN):
         with tf.variable_scope("discriminator") as scope:
             if reuse:
                 scope.reuse_variables()
-            h0 = lrelu(self.d_bn0(conv2d(input_images, output_dim=32, name='h0'), train=bn_train)) ## [-1, 32, 32, 32]
-            h1 = lrelu(self.d_bn1(conv2d(h0, output_dim=64, name='h1'), train=bn_train)) ## [-1, 16, 16, 64]
-            h2 = lrelu(self.d_bn2(conv2d(h1, output_dim=128, name='h2'), train=bn_train)) ## [-1, 8, 8, 128]
-            h3 = lrelu(self.d_bn3(conv2d(h2, output_dim=256, name='h3'), train=bn_train)) ## [-1, 4, 4, 256]
+            h0 = lrelu(self.d_bn0(conv2d(input_images, output_dim=32, name='h0'), train=bn_train), leak=0.1) ## [-1, 32, 32, 32]
+            h1 = lrelu(self.d_bn1(conv2d(h0, output_dim=64, name='h1'), train=bn_train), leak=0.1) ## [-1, 16, 16, 64]
+            h2 = lrelu(self.d_bn2(conv2d(h1, output_dim=128, name='h2'), train=bn_train), leak=0.1) ## [-1, 8, 8, 128]
+            h3 = lrelu(self.d_bn3(conv2d(h2, output_dim=256, name='h3'), train=bn_train), leak=0.1) ## [-1, 4, 4, 256]
             h4_gan = linear(tf.reshape(h3, [-1, 4096]), 1, 'h4_gan')
             h4_aux = linear(tf.reshape(h3, [-1, 4096]), self.y_dim, 'h4_aux')
             return h4_gan, h4_aux
@@ -434,13 +433,13 @@ class ACGAN(GAN):
             bsize = tf.shape(z_random)[0]
             inputs = tf.concat([z_random, input_labels], axis=1)
             h0 = tf.reshape(linear(inputs, 4096, 'h0'), [-1, 4, 4, 256])
-            h0 = lrelu(self.g_bn0(h0, train=bn_train))
+            h0 = tf.nn.relu(self.g_bn0(h0, train=bn_train))
             h1 = deconv2d(h0, [bsize, 8, 8, 128], name='h1')
-            h1 = lrelu(self.g_bn1(h1, train=bn_train))
+            h1 = tf.nn.relu(self.g_bn1(h1, train=bn_train))
             h2 = deconv2d(h1, [bsize, 16, 16, 64], name='h2')
-            h2 = lrelu(self.g_bn2(h2, train=bn_train))
+            h2 = tf.nn.relu(self.g_bn2(h2, train=bn_train))
             h3 = deconv2d(h2, [bsize, 32, 32, 32], name='h3')
-            h3 = lrelu(self.g_bn3(h3, train=bn_train))
+            h3 = tf.nn.relu(self.g_bn3(h3, train=bn_train))
             h4 = deconv2d(h3, [bsize, 64, 64, 3], name='h4')
             return (tf.tanh(h4)/2. + 0.5)
     
@@ -481,16 +480,20 @@ class ACGAN(GAN):
         self.sess.run(initOp)
         
         ## main training loop
-        loss_aux_d_list = []
+        loss_aux_real_epoch = []
+        loss_aux_fake_epoch = []
+        accuracy_real_epoch = []
+        accuracy_fake_epoch = []
+        loss_aux_real_list = []
+        loss_aux_fake_list = []
         accuracy_real_list = []
-        loss_aux_g_list = []
         accuracy_fake_list = []
         best_vae_loss = 0
         stopping_step = 0
         for epoch in range(1, (nEpochs+1)):
-            loss_aux_d_batch = []
+            loss_aux_real_batch = []
+            loss_aux_fake_batch = []
             accuracy_real_batch = []
-            loss_aux_g_batch = []
             accuracy_fake_batch = []
             idx = 0
             np.random.shuffle(idx_all)
@@ -498,7 +501,7 @@ class ACGAN(GAN):
                 #### update D once
                 #for _ in range(train_period_d):
                 if True:
-                    batch_idxs = idx_all[idx*32:(idx+1)*32]
+                    batch_idxs = idx_all[idx*bsize:(idx+1)*bsize]
                     batch_files = data_list[batch_idxs]
                     if len(batch_files) == 0:
                         idx = nBatches
@@ -508,50 +511,51 @@ class ACGAN(GAN):
                     batch_labels = np.array(label_list[batch_idxs]).astype(np.float32)
                     batch_labels = np.expand_dims(batch_labels, axis=1)
                     batch_z_random = np.random.uniform(-1, 1, [batch_images.shape[0], self.random_dim]).astype(np.float32)
-                    _, loss_aux_d, d_aux_logit_real, d_aux_logit_fake = self.sess.run([self.train_op_d,
-                                                                                       self.loss_aux_d,
-                                                                                       self.d_aux_logit_real,
-                                                                                       self.d_aux_logit_fake],
-                                                                  feed_dict={self.input_images: batch_images,
-                                                                             self.input_labels: batch_labels,
-                                                                             self.z_random: batch_z_random,
-                                                                             self.bn_train: True,
-                                                                             self.learning_rate: learning_rate_start})
-                    loss_aux_d_batch.append(loss_aux_d)
-                    accuracy_real = accuracy_score(d_aux_logit_real >= 0, batch_labels == 1.0)
+                    temp_results = self.sess.run([self.train_op_d,
+                                                  self.loss_aux_real,
+                                                  self.loss_aux_fake,
+                                                  self.d_aux_logit_real,
+                                                  self.d_aux_logit_fake],
+                                                 feed_dict={self.input_images: batch_images,
+                                                            self.input_labels: batch_labels,
+                                                            self.z_random: batch_z_random,
+                                                            self.bn_train: True,
+                                                            self.learning_rate: learning_rate_start})
+                    loss_aux_real_batch.append(temp_results[1])
+                    loss_aux_fake_batch.append(temp_results[2])
+                    accuracy_real = accuracy_score(temp_results[3] >= 0, batch_labels == 1.0)
                     accuracy_real_batch.append(accuracy_real)
-                    accuracy_fake = accuracy_score(d_aux_logit_fake >= 0, batch_labels == 1.0)
+                    accuracy_fake = accuracy_score(temp_results[4] >= 0, batch_labels == 1.0)
                     accuracy_fake_batch.append(accuracy_fake)
                     idx += 1
                 #### update G once
                 #for _ in range(train_period_g):
                 if True:
                     #batch_z_random = np.random.uniform(-1, 1, [bsize, self.random_dim]).astype(np.float32)
-                    _, loss_aux_g, d_aux_logit_real, d_aux_logit_fake = self.sess.run([self.train_op_g,
-                                                                                       self.loss_aux_g,
-                                                                                       self.d_aux_logit_real,
-                                                                                       self.d_aux_logit_fake],
-                                                                  feed_dict={self.input_images: batch_images,
-                                                                             self.input_labels: batch_labels,
-                                                                             self.z_random: batch_z_random,
-                                                                             self.bn_train: True,
-                                                                             self.learning_rate: learning_rate_start})
-                    loss_aux_g_batch.append(loss_aux_g)
-                    accuracy_real = accuracy_score(d_aux_logit_real >= 0, batch_labels == 1.0)
-                    accuracy_real_batch.append(accuracy_real)
-                    accuracy_fake = accuracy_score(d_aux_logit_fake >= 0, batch_labels == 1.0)
-                    accuracy_fake_batch.append(accuracy_fake)
+                    self.sess.run(self.train_op_g,
+                                  feed_dict={self.input_images: batch_images,
+                                             self.input_labels: batch_labels,
+                                             self.z_random: batch_z_random,
+                                             self.bn_train: True,
+                                             self.learning_rate: learning_rate_start})
                     
-            ### record D and G loss for each iteration (instead of each epoch)
-            loss_aux_d_list.extend(loss_aux_d_batch)
+            ### record aux loss and accuracy for each iteration
+            loss_aux_real_list.extend(loss_aux_real_batch)
+            loss_aux_fake_list.extend(loss_aux_fake_batch)
             accuracy_real_list.extend(accuracy_real_batch)
-            loss_aux_g_list.extend(loss_aux_g_batch)
             accuracy_fake_list.extend(accuracy_fake_batch)
-            # loss_d.append(np.mean(loss_d_batch))
-            # loss_g.append(np.mean(loss_g_batch))
+            ### record (averaged) aux loss and accuracy for each epoch
+            loss_aux_real_epoch.append(np.mean(loss_aux_real_batch))
+            loss_aux_fake_epoch.append(np.mean(loss_aux_fake_batch))
+            accuracy_real_epoch.append(np.mean(accuracy_real_batch))
+            accuracy_fake_epoch.append(np.mean(accuracy_fake_batch))
             
-            print('Epoch: %d, loss_aux_d: %f, accuracy_real: %f, loss_aux_g: %f, accuracy_fake: %f' % \
-                  (epoch, np.mean(loss_aux_d_batch), np.mean(accuracy_real_batch), np.mean(loss_aux_g_batch), np.mean(accuracy_fake_batch)))
+            print('Epoch: %d, loss_aux_d: %f, loss_aux_g: %f, accuracy_real: %f, accuracy_fake: %f' % \
+                  (epoch,
+                   np.mean(loss_aux_real_batch),
+                   np.mean(loss_aux_fake_batch),
+                   np.mean(accuracy_real_batch),
+                   np.mean(accuracy_fake_batch)))
             
             ### save model and run inference for every 10 epochs
             if epoch % 10 == 0:
@@ -573,6 +577,65 @@ class ACGAN(GAN):
                                     os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
                                     global_step=epoch)
             
-        return [loss_aux_d_list, accuracy_real_list, loss_aux_g_list, accuracy_fake_list]
+        return [loss_aux_real_list, loss_aux_fake_list, loss_aux_real_epoch, loss_aux_fake_epoch,
+                accuracy_real_list, accuracy_fake_list, accuracy_real_epoch, accuracy_fake_epoch]
+    
+    def inference(self,
+                  gen_from=None,
+                  gen_from_ckpt=None,
+                  out_path=None,
+                  bsize=32,
+                  set_seed=1002):
+        ## create output folder
+        if gen_from is None:
+            gen_from = os.path.join(self.result_path, self.model_name, 'models')
+        if out_path is not None:
+            if os.path.exists(out_path):
+                print('WARNING: the output path "{}" already exists!'.format(out_path))
+            else:
+                os.makedirs(out_path)
+        else:
+            out_path = os.path.join(self.result_path, self.model_name)
+        
+        ## load previous model if possible
+        could_load, checkpoint_counter = self.load(gen_from, gen_from_ckpt)
+        if could_load:
+            print(" [*] Load SUCCESS")
+            ### set seed to generate identical figures for the report
+            np.random.seed(set_seed)
+            
+            ### fig3_2.jpg: learning curve
+            #### Assume that 'results.npy' (containing losses vs. training iterations)
+            #### is saved in the same directory as the model checkpoint
+            results = np.load(os.path.join(gen_from, 'results.npy'))
+            fig, ax = plt.subplots(1,2, figsize=(16,6))
+            ax[0].plot(range(len(results[0])), results[0], label='Real', color='royalblue', alpha = 0.2)
+            ax[0].plot(range(len(results[1])), results[1], label='Fake', color='tomato', alpha = 0.2)
+            ax[0].plot(range(len(results[2])), results[2], label='Real (per epoch)', color='royalblue', linewidth=3.0, alpha = 0.7)
+            ax[0].plot(range(len(results[3])), results[3], label='Fake (per epoch)', color='tomato', linewidth=3.0, alpha = 0.7)
+            ax[0].set_xlabel('Training iterations')
+            ax[0].set_title('Training Loss of Attribute Classification', fontsize=20)
+            ax[0].legend(loc="upper right", fontsize=16)
+            ax[1].plot(range(len(results[4])), results[4], label='Real', color='royalblue', alpha = 0.2)
+            ax[1].plot(range(len(results[5])), results[5], label='Fake', color='tomato', alpha = 0.2)
+            ax[1].plot(range(len(results[6])), results[6], label='Real (per epoch)', color='royalblue', linewidth=3.0, alpha = 0.7)
+            ax[1].plot(range(len(results[7])), results[7], label='Fake (per epoch)', color='tomato', linewidth=3.0, alpha = 0.7)
+            ax[1].set_xlabel('Training iterations')
+            ax[1].set_title('Accuracy of Discriminator', fontsize=20)
+            ax[1].legend(loc="lower right", fontsize=16)
+            plt.savefig(os.path.join(out_path, 'fig2_2.jpg'))
+            plt.close(fig)
+            
+            #### fig3_3.jpg: plot 10 randomly generated images with opposite attrbutes
+            batch_z_random = np.random.uniform(-1, 1, [10, self.random_dim]).astype(np.float32)
+            batch_z_random = np.concatenate((batch_z_random, batch_z_random), axis=0)
+            batch_labels = np.array([np.repeat((0, 1), 10)]).astype(np.float32).reshape((20, 1))
+
+            samples = self.sess.run(self.image_sample, feed_dict={self.z_random: batch_z_random,
+                                                                  self.input_labels: batch_labels,
+                                                                  self.bn_train: False})
+            fig = self.plot(samples, 2, 10)
+            plt.savefig(os.path.join(out_path, 'fig3_3.jpg'))
+            plt.close(fig)
 
 
