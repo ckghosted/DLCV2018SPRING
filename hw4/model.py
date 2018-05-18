@@ -58,6 +58,7 @@ class VAE(object):
         self.z_mu, self.z_logvar = self.encoder(self.input_images, self.bn_train)
         self.z_sample = self.sample_z(self.z_mu, self.z_logvar)
         self.recon_images = self.decoder(self.z_sample, self.bn_train)
+        self.recon_images_fixed = self.decoder(self.z_mu, self.bn_train, reuse=True)
         
         ## Sampling from random z
         self.sample_images = self.decoder(self.z_random, self.bn_train, reuse=True)
@@ -274,6 +275,7 @@ class VAE(object):
             print(" [*] Load SUCCESS")
             ### set seed to generate identical figures for the report
             np.random.seed(set_seed)
+            #tf.set_random_seed(set_seed)
             ### data list
             test_list = np.sort(glob.glob(os.path.join(test_path, '*.png')))
             nBatches_test = int(np.ceil(len(test_list) / bsize))
@@ -300,7 +302,7 @@ class VAE(object):
             batch_files = test_list[0:10]
             batch = [get_image(batch_file) for batch_file in batch_files]
             batch_images = np.array(batch).astype(np.float32)
-            recons = self.sess.run(self.recon_images, feed_dict={self.input_images: batch_images,
+            recons = self.sess.run(self.recon_images_fixed, feed_dict={self.input_images: batch_images,
                                                                  self.bn_train: False})
             fig = self.plot(np.concatenate((batch_images, recons), axis=0), 2, 10)
             plt.savefig(os.path.join(out_path, 'fig1_3.jpg'), 
@@ -316,16 +318,21 @@ class VAE(object):
             plt.close(fig)
             
             ### fig1_5.jpg: visualization
+            ### (Also compute the reconstruction MSE of the entire testing set)
             #### t-SNE
             z_mu_all = []
+            mse_all = []
             for idx in range(nBatches_test):
                 batch_files = test_list[idx*bsize:(idx+1)*bsize]
                 batch = [get_image(batch_file) for batch_file in batch_files]
                 batch_images = np.array(batch).astype(np.float32)
-                z_mu = self.sess.run(self.z_mu,
+                z_mu, mse = self.sess.run([self.z_mu, self.recon_loss],
                                      feed_dict={self.input_images: batch_images,
                                                 self.bn_train: False})
                 z_mu_all.extend(z_mu)
+                mse_all.extend(mse)
+            print('length if mse_all: %d' % len(mse_all))
+            print('testing MSE: %f' % np.mean(mse_all))
             z_mu_all = np.array(z_mu_all).astype(np.float32)
             z_mu_all_2d = TSNE(n_components=2).fit_transform(z_mu_all)
             #### plot
