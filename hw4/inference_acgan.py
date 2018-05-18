@@ -6,7 +6,7 @@ import tensorflow as tf
 import numpy as np
 from model_gan import GAN, ACGAN
 import os, re, glob
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+#os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 import skimage
 import skimage.io
