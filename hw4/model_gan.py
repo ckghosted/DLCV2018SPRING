@@ -1017,7 +1017,7 @@ class INFOGAN(GAN):
             ##### (1) fix the pure random vector
             batch_z_random = np.random.uniform(-1, 1, [n_row, self.random_dim]).astype(np.float32)
             batch_z_random = np.repeat(batch_z_random, self.cat_dim, axis = 0)
-            for cat in range(self.n_cat):
+            for cat in range(2):
                 batch_labels = np.empty([n_row, self.cat_dim, self.n_cat * self.cat_dim])
                 for rep in range(n_row):
                     ##### randomly create the prefixed and postfixed categorical codes (repeat n_row times)
@@ -1037,7 +1037,7 @@ class INFOGAN(GAN):
                                                                       self.input_labels: batch_labels,
                                                                       self.bn_train: False})
                 fig = self.plot(samples, n_row, self.cat_dim)
-                plt.savefig(os.path.join(out_path, 'enum_cat{}.jpg'.format(str(cat).zfill(2))), bbox_inches='tight')
+                plt.savefig(os.path.join(out_path, 'fig4_{}.jpg'.format(str(cat+1).zfill(2))), bbox_inches='tight')
                 plt.close(fig)
             
             #### alternative: use a single random noise vector and enumerate 2 categorical vectors
