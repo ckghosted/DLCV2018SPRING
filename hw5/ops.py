@@ -32,14 +32,15 @@ class batch_norm(object):
             self.epsilon  = epsilon
             self.momentum = momentum
             self.name = name
-    def __call__(self, x, train=True):
+    def __call__(self, x, train=True, reuse=False):
         return tf.contrib.layers.batch_norm(x,
                                             decay=self.momentum,
                                             updates_collections=None,
                                             epsilon=self.epsilon,
                                             scale=True,
                                             is_training=train,
-                                            scope=self.name)
+                                            scope=self.name,
+                                            reuse=reuse)
 
 def conv_cond_concat(x, y):
     """Concatenate conditioning vector on feature map axis."""
@@ -89,11 +90,21 @@ def lrelu(x, leak=0.01, name="lrelu"):
 def linear(input_, output_size, scope=None, stddev=0.02, bias_start=0.0, with_w=False):
     shape = input_.get_shape().as_list()
     with tf.variable_scope(scope or "Linear"):
-        matrix = tf.get_variable("Matrix", [shape[1], output_size], tf.float32,
-                                 tf.random_normal_initializer(stddev=stddev))
-        bias = tf.get_variable("bias", [output_size],
-                               initializer=tf.constant_initializer(bias_start))
-        if with_w:
-            return tf.matmul(input_, matrix) + bias, matrix, bias
-        else:
-            return tf.matmul(input_, matrix) + bias
+        if len(shape) == 2:
+            matrix = tf.get_variable("Matrix", [shape[-1], output_size], tf.float32,
+                                     tf.random_normal_initializer(stddev=stddev))
+            bias = tf.get_variable("bias", [output_size],
+                                   initializer=tf.constant_initializer(bias_start))
+            if with_w:
+                return tf.matmul(input_, matrix) + bias, matrix, bias
+            else:
+                return tf.matmul(input_, matrix) + bias
+        elif len(shape) == 3:
+            matrix = tf.get_variable("Matrix", [output_size, shape[-1], 1], tf.float32,
+                                     tf.random_normal_initializer(stddev=stddev))
+            bias = tf.get_variable("bias", [output_size, 1],
+                                   initializer=tf.constant_initializer(bias_start))
+            if with_w:
+                return tf.matmul(input_, matrix) + tf.reshape(tf.tile(bias, [shape[1], 1]), [-1, shape[1], 1]), matrix, bias
+            else:
+                return tf.matmul(input_, matrix) + tf.reshape(tf.tile(bias, [shape[1], 1]), [-1, shape[1], 1])

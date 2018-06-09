@@ -1,7 +1,6 @@
 import os, re, time, glob
 import numpy as np
 import tensorflow as tf
-from tensorflow.contrib.layers import batch_norm
 from tensorflow.contrib import rnn
 
 import matplotlib.pyplot as plt
@@ -695,6 +694,7 @@ class LSTM_SEQ(LSTM):
         self.features = tf.placeholder(tf.float32, shape=[None, self.max_seq_len, self.feature_dim], name='features')
         self.labels = tf.placeholder(tf.int32, shape=[None, self.max_seq_len, self.n_class], name='labels')
         self.seqlen = tf.placeholder(tf.int32, [None])
+        self.weights = tf.placeholder(tf.float32, [None])
         self.bn_train = tf.placeholder('bool')
         self.learning_rate = tf.placeholder(tf.float32, shape=[])
         self.keep_prob = tf.placeholder(tf.float32, name="keep_probabilty")
@@ -736,13 +736,26 @@ class LSTM_SEQ(LSTM):
         self.outputs_drop = [tf.nn.dropout(out, self.keep_prob) for out in self.outputs]
         
         ## logits and predictions
+        with tf.variable_scope('h1'):
+            h1_W = tf.get_variable('W', [self.h_dim, self.h_dim/2])
+            h1_b = tf.get_variable('b', [self.h_dim/2], initializer=tf.constant_initializer(0.0))
         with tf.variable_scope('softmax'):
-            W = tf.get_variable('W_softmax', [self.h_dim, self.n_class])
+            W = tf.get_variable('W_softmax', [self.h_dim/2, self.n_class])
             b = tf.get_variable('b_softmax', [self.n_class], initializer=tf.constant_initializer(0.0))
-        self.logits_series = [tf.matmul(out, W) + b for out in self.outputs_drop]
+        #h1_out = [tf.nn.relu(self.bn1(tf.matmul(self.outputs_drop[0], h1_W) + h1_b, train=self.bn_train))]
+        #for out in self.outputs_drop[1:]:
+        #    h1_out.append(tf.nn.relu(self.bn1(tf.matmul(out, h1_W) + h1_b, train=self.bn_train, reuse=True)))
+        h1_out = [tf.nn.relu(tf.matmul(out, h1_W) + h1_b) for out in self.outputs_drop]
+        self.logits_series = [tf.matmul(out, W) + b for out in h1_out]
+        #with tf.variable_scope('softmax'):
+        #    W = tf.get_variable('W_softmax', [self.h_dim, self.n_class])
+        #    b = tf.get_variable('b_softmax', [self.n_class], initializer=tf.constant_initializer(0.0))
+        #self.logits_series = [tf.matmul(out, W) + b for out in self.outputs_drop]
         
         self.pred_series = [tf.nn.softmax(logit) for logit in self.logits_series]
-        self.losses = [tf.nn.softmax_cross_entropy_with_logits(labels=label, logits=logit) \
+        #class_weights = tf.constant([[1.0, 4.0, 6.6, 6.6, 6.6, 6.6, 6.6, 6.6, 6.6, 6.6, 6.6]])
+        self.losses = [tf.nn.softmax_cross_entropy_with_logits(labels=label, logits=logit) * \
+                       tf.reduce_sum(self.weights * tf.cast(label, tf.float32), axis=1) \
                        for logit, label in zip(self.logits_series, tf.unstack(self.labels, self.max_seq_len, 1))]
         
         ## compute loss!
@@ -870,7 +883,7 @@ class LSTM_SEQ(LSTM):
             acc_train_batch = []
             acc_valid_batch = []
             for idx in range(nBatches-1):
-                print('training idx = %d' % idx)
+                #print('training idx = %d' % idx)
                 batch_features = np.array(features_train_new[idx*bsize:(idx+1)*bsize])
                 #print(batch_features.shape)
                 batch_labels = labels_train_vec_new[idx*bsize:(idx+1)*bsize]
@@ -879,10 +892,18 @@ class LSTM_SEQ(LSTM):
                 #    print(batch_labels[ii].shape)
                 batch_seqlen = np.array(seqlen_train_list[idx*bsize:(idx+1)*bsize])
                 #print(batch_seqlen)
+                
+                #### Decide the loss weight
+                y_true = np.argmax(np.array(batch_labels), axis=2).reshape([-1])
+                weights = [(len(y_true)/np.sum([y_t == idx_c for y_t in y_true]))**0.5 for idx_c in range(self.n_class)]
+                #print(weights)
+                
                 _, loss, logits, losses = self.sess.run([self.train_op, self.total_loss, self.logits_series, self.losses],
                                                 feed_dict={self.features: batch_features,
                                                            self.labels: batch_labels,
                                                            self.seqlen: batch_seqlen,
+                                                           self.weights: weights,
+                                                           #self.weights: np.ones(self.n_class),
                                                            self.bn_train: True,
                                                            self.learning_rate: learning_rate,
                                                            self.keep_prob: keep_prob})
@@ -891,17 +912,16 @@ class LSTM_SEQ(LSTM):
                 #print(len(logits))
                 #print(logits[0].shape)
                 loss_train_batch.append(loss)
-                y_true = np.argmax(np.array(batch_labels), axis=2).reshape([-1])
                 y_pred = np.argmax(logits, axis=2).reshape([-1])
                 #print(y_true)
-                print('y_true has %f zeros!' % (np.sum([y_t == 0 for y_t in y_true])/len(y_true)))
+                #print('y_true has %f zeros!' % (np.sum([y_t == 0 for y_t in y_true])/len(y_true)))
                 #print(y_pred)
-                print('y_pred has %f zeros!' % (np.sum([y_p == 0 for y_p in y_pred])/len(y_pred)))
+                #print('y_pred has %f zeros!' % (np.sum([y_p == 0 for y_p in y_pred])/len(y_pred)))
                 acc_train_batch.append(accuracy_score(y_true, y_pred))
                 #return [batch_features, batch_labels, logits, loss, losses]
             ### compute validation loss
             for idx in range(nBatches_valid):
-                print('validation idx = %d' % idx)
+                #print('validation idx = %d' % idx)
                 batch_features = np.array(features_valid_new[idx*bsize:(idx+1)*bsize])
                 #print(batch_features.shape)
                 batch_labels = labels_valid_vec_new[idx*bsize:(idx+1)*bsize]
@@ -910,19 +930,21 @@ class LSTM_SEQ(LSTM):
                 #    print(batch_labels[ii].shape)
                 batch_seqlen = np.array(seqlen_valid_list[idx*bsize:(idx+1)*bsize])
                 #print(batch_seqlen)
+                
                 loss, logits = self.sess.run([self.total_loss, self.logits_series],
                                              feed_dict={self.features: batch_features,
                                                         self.labels: batch_labels,
                                                         self.seqlen: batch_seqlen,
+                                                        self.weights: np.ones(self.n_class),
                                                         self.bn_train: False,
                                                         self.keep_prob: 1.0})
                 loss_valid_batch.append(loss)
                 y_true = np.argmax(np.array(batch_labels), axis=2).reshape([-1])
                 y_pred = np.argmax(logits, axis=2).reshape([-1])
                 #print(y_true)
-                print('y_true has %f zeros!' % (np.sum([y_t == 0 for y_t in y_true])/len(y_true)))
+                #print('y_true has %f zeros!' % (np.sum([y_t == 0 for y_t in y_true])/len(y_true)))
                 #print(y_pred)
-                print('y_pred has %f zeros!' % (np.sum([y_p == 0 for y_p in y_pred])/len(y_pred)))
+                #print('y_pred has %f zeros!' % (np.sum([y_p == 0 for y_p in y_pred])/len(y_pred)))
                 acc_valid_batch.append(accuracy_score(y_true, y_pred))
             ### record training loss for each epoch (instead of each iteration)
             loss_train.append(np.mean(loss_train_batch))
@@ -950,7 +972,87 @@ class LSTM_SEQ(LSTM):
                     print('stopping_step >= patience (%d), stop training' % patience)
                     break
         return [loss_train, loss_valid, acc_train, acc_valid]
-
+    
+    def inference(self,
+                  cnn_features,
+                  saved_labels
+                  gen_from=None,
+                  gen_from_ckpt=None,
+                  out_path=None,
+                  bsize=32):
+        ## create output folder
+        if gen_from is None:
+            gen_from = os.path.join(self.result_path, self.model_name, 'models')
+        if out_path is not None:
+            if os.path.exists(out_path):
+                print('WARNING: the output path "{}" already exists!'.format(out_path))
+            else:
+                os.makedirs(out_path)
+        else:
+            out_path = os.path.join(self.result_path, self.model_name)
+        
+        ## load previous model if possible
+        could_load, checkpoint_counter = self.load(gen_from, gen_from_ckpt)
+        if could_load:
+            print(" [*] Load SUCCESS")
+            
+            ## load features
+            features_valid = cnn_features
+            ## load labels (and make them one-hot vectors)
+            labels_valid = saved_labels
+            labels_valid_vec = [np.eye(self.n_class)[list(lab_valid.astype(np.int32))] for lab_valid in labels_valid]
+            ## reshape them into (n_sample, self.max_seq_len, self.feature_dim) and (n_sample, self.max_seq_len, self.n_class)
+            features_valid_new = []
+            labels_valid_vec_new = []
+            seqlen_valid_list = []
+            for idx_t in range(len(features_valid)):
+                ### for each video, loop the number of samples it can have,
+                ### e.g., np.ceil(2140 / 300) = 8, np.ceil(938 / 300) = 4, ...
+                for ns in range(int(np.ceil(len(features_valid[idx_t]) / self.max_seq_len))):
+                    fetch_f = np.array(features_valid[idx_t][ns*self.max_seq_len:(ns+1)*self.max_seq_len], dtype=np.float32)
+                    fetch_l = np.array(labels_valid_vec[idx_t][ns*self.max_seq_len:(ns+1)*self.max_seq_len], dtype=np.int32)
+                    #seqlen_valid_list.append(fetch_f.shape[0])
+                    #### padding 0's if necessary
+                    if fetch_f.shape[0] < self.max_seq_len:
+                        fetch_f_pad = np.vstack((fetch_f, np.zeros((self.max_seq_len - fetch_f.shape[0], self.feature_dim))))
+                        #features_valid_new.append(fetch_f_pad)
+                        fetch_l_pad = np.vstack((fetch_l, np.zeros((self.max_seq_len - fetch_l.shape[0], self.n_class))))
+                        #labels_valid_vec_new.append(fetch_l_pad)
+                    else:
+                        features_valid_new.append(fetch_f)
+                        labels_valid_vec_new.append(fetch_l)
+                        seqlen_valid_list.append(self.max_seq_len)
+            nBatches_valid = int(np.ceil(len(features_valid_new) / bsize))
+            
+            ### p2_result.txt: make prediction
+            loss_batch = []
+            acc_batch = []
+            y_pred_list = []
+            for idx in range(nBatches):
+                batch_features = features_new[idx*bsize:(idx+1)*bsize]
+                ### padding 0
+                batch_features_pad = np.array([np.vstack((f, np.zeros((self.max_seq_len - f.shape[0], f.shape[1])))) \
+                                               if f.shape[0] < self.max_seq_len \
+                                               else f[0:self.max_seq_len] \
+                                               for f in batch_features])
+                batch_labels = labels_vec[idx*bsize:(idx+1)*bsize]
+                batch_seqlen = np.array([np.min((f.shape[0], self.max_seq_len)) for f in batch_features], dtype=np.int32)
+                loss, logits = self.sess.run([self.loss, self.logits],
+                                             feed_dict={self.features: batch_features_pad,
+                                                        self.labels: batch_labels,
+                                                        self.seqlen: batch_seqlen,
+                                                        self.bn_train: False,
+                                                        self.keep_prob: 1.0})
+                loss_batch.append(loss)
+                y_true = np.argmax(batch_labels, axis=1)
+                y_pred = np.argmax(logits, axis=1)
+                acc_batch.append(accuracy_score(y_true, y_pred))
+                y_pred_list.extend(y_pred)
+            print('valid loss: %f, valid accuracy: %f' % \
+                  (np.mean(loss_batch), np.mean(acc_batch)))
+            with open(os.path.join(out_path, 'p2_result.txt'), 'w') as f:
+                for y in y_pred_list:
+                    f.write(str(y)+'\n')
 
 
 
